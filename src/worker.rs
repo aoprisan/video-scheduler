@@ -98,11 +98,11 @@ pub async fn run(
         if *shutdown.borrow() {
             return Ok(());
         }
-        if yt.connected().await {
-            if let Some(j) = store.claim(now())? {
-                process(&store, yt.as_ref(), j).await?;
-                continue;
-            }
+        if yt.connected().await
+            && let Some(j) = store.claim(now())?
+        {
+            process(&store, yt.as_ref(), j).await?;
+            continue;
         }
         tokio::select! {_ = tokio::time::sleep(std::time::Duration::from_secs(5))=>{},_ = shutdown.changed()=>{return Ok(())}}
     }

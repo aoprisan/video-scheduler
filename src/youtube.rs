@@ -426,12 +426,12 @@ impl YouTube {
             .as_str()
             .unwrap_or("YouTube channel");
         let mut guard = self.credentials.lock().await;
-        if let Some(old) = self.store.setting("channel_id")? {
-            if old != id {
-                bail!(
-                    "This queue belongs to a different channel. Reconnect the original channel or use another data directory."
-                );
-            }
+        if let Some(old) = self.store.setting("channel_id")?
+            && old != id
+        {
+            bail!(
+                "This queue belongs to a different channel. Reconnect the original channel or use another data directory."
+            );
         }
         // Legacy Python credentials have no channel binding: avoid changing them with pending jobs.
         if self.store.setting("channel_id")?.is_none()
