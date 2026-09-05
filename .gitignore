@@ -16,3 +16,4 @@ token*.json
 *.mov
 *.mkv
 .DS_Store
+/target/
