@@ -189,6 +189,17 @@ impl Store {
             })
             .optional()?)
     }
+    /// Test-only escape hatch for arranging states the public API refuses to create,
+    /// such as an elapsed deadline or an exhausted attempt count.
+    #[cfg(test)]
+    pub fn force(&self, id: &str, column: &str, value: impl rusqlite::ToSql) -> Result<()> {
+        let n = self.db.lock().unwrap().execute(
+            &format!("UPDATE jobs SET {column}=?1 WHERE id=?2"),
+            params![value, id],
+        )?;
+        assert_eq!(n, 1, "no such job");
+        Ok(())
+    }
     pub fn set(&self, key: &str, value: &str) -> Result<()> {
         self.db.lock().unwrap().execute("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key,value])?;
         Ok(())

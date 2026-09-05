@@ -13,6 +13,22 @@ pub const SCOPE: &str = "https://www.googleapis.com/auth/youtube.force-ssl";
 const API: &str = "https://www.googleapis.com/youtube/v3/videos";
 const UPLOAD: &str = "https://www.googleapis.com/upload/youtube/v3/videos";
 const CHUNK: usize = 8 * 1024 * 1024;
+const TOKEN: &str = "https://oauth2.googleapis.com/token";
+/// Google's endpoints in production; tests point these at a local fake peer.
+pub struct Endpoints {
+    pub api: String,
+    pub upload: String,
+    pub token: String,
+}
+impl Default for Endpoints {
+    fn default() -> Self {
+        Self {
+            api: API.into(),
+            upload: UPLOAD.into(),
+            token: TOKEN.into(),
+        }
+    }
+}
 #[derive(Debug)]
 pub struct RemoteError {
     pub message: String,
@@ -82,9 +98,13 @@ pub struct YouTube {
     pub http: Client,
     pub credentials: Mutex<Option<Credentials>>,
     pub store: Arc<Store>,
+    pub endpoints: Endpoints,
 }
 impl YouTube {
     pub fn new(store: Arc<Store>) -> Result<Self> {
+        Self::with_endpoints(store, Endpoints::default())
+    }
+    pub fn with_endpoints(store: Arc<Store>, endpoints: Endpoints) -> Result<Self> {
         let path = store.dir.join("token.json");
         let creds = if path.exists() {
             Some(
@@ -98,6 +118,7 @@ impl YouTube {
             http: client()?,
             credentials: Mutex::new(creds),
             store,
+            endpoints,
         })
     }
     pub async fn connected(&self) -> bool {
@@ -112,7 +133,7 @@ impl YouTube {
         if c.expires_at < now() + 120.0 {
             let response = self
                 .http
-                .post("https://oauth2.googleapis.com/token")
+                .post(&self.endpoints.token)
                 .form(&[
                     ("client_id", c.client_id.as_str()),
                     ("client_secret", c.client_secret.as_str()),
@@ -143,6 +164,16 @@ impl YouTube {
             save_credentials(&self.store.dir.join("token.json"), c)?;
         }
         Ok(c.token.clone())
+    }
+    /// Production keeps the strict Google check; a test peer is confined to its own base URL.
+    fn check_session(&self, url: &str) -> Result<()> {
+        if self.endpoints.upload == UPLOAD {
+            validate_session(url)
+        } else if url.starts_with(self.endpoints.upload.as_str()) {
+            Ok(())
+        } else {
+            bail!("Unexpected upload session URL")
+        }
     }
     pub async fn request(
         &self,
@@ -185,7 +216,7 @@ impl YouTube {
             .as_str()
             .filter(|s| s.len() < 80 && s.chars().all(|c| c.is_ascii_alphanumeric()))
             .unwrap_or("unknown");
-        if matches!(status, 404 | 410) && url.starts_with(UPLOAD) {
+        if matches!(status, 404 | 410) && url.starts_with(self.endpoints.upload.as_str()) {
             return Err(remote_error(
                 "Upload session expired. Check YouTube Studio before creating another job; no duplicate upload will be started.",
                 false,
@@ -207,7 +238,10 @@ impl YouTube {
         let r = self
             .request(
                 Method::POST,
-                &format!("{UPLOAD}?uploadType=resumable&part=snippet,status"),
+                &format!(
+                    "{}?uploadType=resumable&part=snippet,status",
+                    self.endpoints.upload
+                ),
                 vec![
                     ("X-Upload-Content-Length", j.size.to_string()),
                     ("X-Upload-Content-Type", "application/octet-stream".into()),
@@ -221,7 +255,7 @@ impl YouTube {
             .get("location")
             .and_then(|v| v.to_str().ok())
             .context("YouTube returned no upload session")?;
-        validate_session(url)?;
+        self.check_session(url)?;
         Ok(url.into())
     }
     pub async fn upload(&self, j: &Job) -> Result<String> {
@@ -229,7 +263,7 @@ impl YouTube {
             .session_url
             .as_deref()
             .context("Missing saved upload session")?;
-        validate_session(url)?;
+        self.check_session(url)?;
         let mut r = self
             .request(
                 Method::PUT,
@@ -299,7 +333,7 @@ impl YouTube {
         let v: Value = self
             .request(
                 Method::GET,
-                &format!("{API}?part=status&id={id}"),
+                &format!("{}?part=status&id={id}", self.endpoints.api),
                 vec![],
                 None,
                 None,
@@ -342,7 +376,7 @@ impl YouTube {
         let r: Value = self
             .request(
                 Method::PUT,
-                &format!("{API}?part=status"),
+                &format!("{}?part=status", self.endpoints.api),
                 vec![],
                 Some(json!({"id":id,"status":mutable})),
                 None,

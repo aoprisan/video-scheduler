@@ -163,12 +163,17 @@ cargo test
 cargo run
 ```
 
-CI runs those three checks on every push and pull request. The crate has no automated tests yet;
-`cargo test` currently passes vacuously, and a real upload requires your own OAuth client and an
-eligible channel.
+CI runs those three checks on every push and pull request.
+
+Tests use temporary data directories and a simulated YouTube peer — a stateful HTTP server that
+owns the received bytes and the remote video status, so restarts and lost responses replay against
+durable remote state. They exercise queue timing, private upload, resumable transfer and resumption
+at the received offset, delayed publication, retry and restart recovery, cancellation, metadata
+validation, and the web layer's routing, origin/CSRF checks, and password gate. Nothing contacts
+Google or publishes content; a real upload requires your own OAuth client and an eligible channel.
 
 Code layout: `main.rs` startup, CLI, and safety checks; `web.rs` routes, auth middleware, and the
 upload endpoint; `views.rs` server-rendered maud markup; `store.rs` the SQLite queue; `worker.rs`
 execution and recovery; `youtube.rs` OAuth and the resumable upload protocol; `model.rs` timestamps,
-validation, and fingerprinting. Static assets live in `web/`, and `docs/design.md` records the
-visual system the UI implements.
+validation, and fingerprinting; `tests/` the suite above. Static assets live in `web/`, and
+`docs/design.md` records the visual system the UI implements.
